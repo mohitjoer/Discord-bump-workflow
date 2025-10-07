@@ -1,0 +1,23 @@
+2025-10-08 00:38:38,059 - Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2025-10-08 00:38:38,062 - Added job "fetch_stocks" to job store "default"
+2025-10-08 00:38:38,062 - Scheduler started
+2025-10-08 00:38:48,265 - Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2025-10-08 00:38:48,274 - Added job "fetch_stocks" to job store "default"
+2025-10-08 00:38:48,274 - Scheduler started
+2025-10-08 00:39:02,646 - Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2025-10-08 00:39:02,647 - Added job "fetch_stocks" to job store "default"
+2025-10-08 00:39:02,648 - Scheduler started
+2025-10-08 00:39:46,211 - Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2025-10-08 00:39:46,213 - Added job "fetch_stocks" to job store "default"
+2025-10-08 00:39:46,213 - Scheduler started
+2025-10-08 00:39:49,572 - Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2025-10-08 00:39:49,574 - Added job "fetch_stocks" to job store "default"
+2025-10-08 00:39:49,574 - Scheduler started
+2025-10-08 00:40:01,287 - Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2025-10-08 00:40:01,289 - Added job "fetch_stocks" to job store "default"
+2025-10-08 00:40:01,289 - Scheduler started
+2025-10-08 00:40:48,793 - Updated AAPL: $256.2
+2025-10-08 00:40:50,430 - Updated MSFT: $523.13
+2025-10-08 00:40:55,038 - Updated AAPL: $256.2
+2025-10-08 00:40:56,062 - Updated MSFT: $523.13
+2025-10-08 00:40:59,240 - Updated GOOGL: $246.62
