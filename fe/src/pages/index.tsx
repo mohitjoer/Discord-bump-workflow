@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { TrendingUp, TrendingDown, Activity } from "lucide-react";
 import axios from "axios";
 
@@ -21,7 +21,7 @@ export default function Home() {
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
   // Fetch initial data
-  const fetchInitialData = async () => {
+  const fetchInitialData = useCallback(async () => {
     try {
       console.log("🔄 Fetching initial stock data...");
       const symbols = ["AAPL", "MSFT", "GOOGL"];
@@ -37,7 +37,7 @@ export default function Home() {
           stockData[response.data.symbol] = response.data;
           console.log(`✅ Loaded ${response.data.symbol}: $${response.data.current}`);
         } else {
-          console.error(`❌ Error loading ${response.config.url}:`, response.data.error);
+          console.error(`❌ Error loading ${response.config?.url}:`, response.data.error);
         }
       });
 
@@ -49,38 +49,38 @@ export default function Home() {
       console.error("❌ Failed to fetch initial stock data:", error);
       setLoading(false);
     }
-  };
+  }, []);
 
   // Polling fallback function
-  const pollStockData = async () => {
+  const pollStockData = useCallback(async () => {
     try {
       console.log("🔄 Polling stock data...");
       await fetchInitialData();
     } catch (error) {
       console.error("❌ Polling failed:", error);
     }
-  };
+  }, [fetchInitialData]);
 
   // Start polling as fallback
-  const startPolling = () => {
+  const startPolling = useCallback(() => {
     if (pollingRef.current) {
       clearInterval(pollingRef.current);
     }
     pollingRef.current = setInterval(pollStockData, 60000); // Poll every 60 seconds
     console.log("🔄 Started polling fallback (60s intervals)");
-  };
+  }, [pollStockData]);
 
   // Stop polling
-  const stopPolling = () => {
+  const stopPolling = useCallback(() => {
     if (pollingRef.current) {
       clearInterval(pollingRef.current);
       pollingRef.current = null;
       console.log("⏹️ Stopped polling fallback");
     }
-  };
+  }, []);
 
   // Setup WebSocket connection
-  const setupWebSocket = () => {
+  const setupWebSocket = useCallback(() => {
     try {
       const ws = new WebSocket("ws://127.0.0.1:8000/ws/stocks");
       wsRef.current = ws;
@@ -119,7 +119,7 @@ export default function Home() {
       console.error("❌ Failed to setup WebSocket:", error);
       startPolling(); // Use polling if WebSocket setup fails
     }
-  };
+  }, [startPolling, stopPolling]);
 
   useEffect(() => {
     // Fetch initial data
@@ -138,7 +138,7 @@ export default function Home() {
       }
       stopPolling();
     };
-  }, []);
+  }, [fetchInitialData, setupWebSocket, startPolling, stopPolling]);
 
   const getChangePercent = (current: number, previous: number) => {
     return (((current - previous) / previous) * 100).toFixed(2);
@@ -288,7 +288,7 @@ export default function Home() {
               No market data available
             </h3>
             <p className="text-slate-500 text-sm">
-              Markets may be closed or there's a connection issue
+              Markets may be closed or there&apos;s a connection issue
             </p>
             <button 
               onClick={fetchInitialData}
