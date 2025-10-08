@@ -1,115 +1,304 @@
-import Image from "next/image";
-import { Geist, Geist_Mono } from "next/font/google";
+"use client";
+import { useEffect, useState, useRef } from "react";
+import { TrendingUp, TrendingDown, Activity } from "lucide-react";
+import axios from "axios";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+type StockData = {
+  symbol: string;
+  current: number;
+  high: number;
+  low: number;
+  open: number;
+  previous_close: number;
+};
 
 export default function Home() {
-  return (
-    <div
-      className={`${geistSans.className} ${geistMono.className} font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20`}
-    >
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              src/pages/index.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  const [stocks, setStocks] = useState<Record<string, StockData>>({});
+  const [loading, setLoading] = useState(true);
+  const [connected, setConnected] = useState(false);
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const pollingRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Fetch initial data
+  const fetchInitialData = async () => {
+    try {
+      console.log("🔄 Fetching initial stock data...");
+      const symbols = ["AAPL", "MSFT", "GOOGL"];
+      const responses = await Promise.all(
+        symbols.map((symbol) => 
+          axios.get(`http://127.0.0.1:8000/stock/${symbol}`)
+        )
+      );
+
+      const stockData: Record<string, StockData> = {};
+      responses.forEach((response) => {
+        if (!response.data.error) {
+          stockData[response.data.symbol] = response.data;
+          console.log(`✅ Loaded ${response.data.symbol}: $${response.data.current}`);
+        } else {
+          console.error(`❌ Error loading ${response.config.url}:`, response.data.error);
+        }
+      });
+
+      setStocks(stockData);
+      setLastUpdate(new Date());
+      setLoading(false);
+      console.log("✅ Initial data loaded successfully");
+    } catch (error) {
+      console.error("❌ Failed to fetch initial stock data:", error);
+      setLoading(false);
+    }
+  };
+
+  // Polling fallback function
+  const pollStockData = async () => {
+    try {
+      console.log("🔄 Polling stock data...");
+      await fetchInitialData();
+    } catch (error) {
+      console.error("❌ Polling failed:", error);
+    }
+  };
+
+  // Start polling as fallback
+  const startPolling = () => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+    }
+    pollingRef.current = setInterval(pollStockData, 60000); // Poll every 60 seconds
+    console.log("🔄 Started polling fallback (60s intervals)");
+  };
+
+  // Stop polling
+  const stopPolling = () => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+      console.log("⏹️ Stopped polling fallback");
+    }
+  };
+
+  // Setup WebSocket connection
+  const setupWebSocket = () => {
+    try {
+      const ws = new WebSocket("ws://127.0.0.1:8000/ws/stocks");
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        console.log("✅ Connected to WebSocket");
+        setConnected(true);
+        stopPolling(); // Stop polling when WebSocket connects
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          if (message.type === "update" && message.stocks) {
+            setStocks(message.stocks);
+            setLastUpdate(new Date());
+            console.log("📈 Received WebSocket stock updates:", message.stocks);
+          }
+        } catch (error) {
+          console.error("❌ Error parsing WebSocket message:", error);
+        }
+      };
+
+      ws.onclose = () => {
+        console.log("❌ Disconnected from WebSocket");
+        setConnected(false);
+        startPolling(); // Start polling when WebSocket disconnects
+      };
+
+      ws.onerror = (e) => {
+        console.error("⚠️ WebSocket error:", e);
+        setConnected(false);
+        startPolling(); // Start polling on WebSocket error
+      };
+    } catch (error) {
+      console.error("❌ Failed to setup WebSocket:", error);
+      startPolling(); // Use polling if WebSocket setup fails
+    }
+  };
+
+  useEffect(() => {
+    // Fetch initial data
+    fetchInitialData();
+
+    // Setup WebSocket
+    setupWebSocket();
+
+    // Start polling as initial fallback
+    startPolling();
+
+    // Cleanup on unmount
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+      stopPolling();
+    };
+  }, []);
+
+  const getChangePercent = (current: number, previous: number) => {
+    return (((current - previous) / previous) * 100).toFixed(2);
+  };
+
+  const isPositive = (current: number, previous: number) => current >= previous;
+
+  if (loading) {
+    return (
+      <main className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6 sm:p-10">
+        <div className="max-w-7xl mx-auto">
+          <div className="flex items-center gap-3 mb-8">
+            <Activity className="w-8 h-8 text-emerald-400 animate-pulse" />
+            <h1 className="text-4xl font-bold text-white">X-Stock</h1>
+          </div>
+          <div className="bg-slate-800/30 backdrop-blur-sm border border-slate-700/50 rounded-2xl p-12 text-center">
+            <Activity className="w-16 h-16 text-slate-600 mx-auto mb-4 animate-spin" />
+            <h3 className="text-xl font-semibold text-slate-400 mb-2">
+              Loading market data...
+            </h3>
+            <p className="text-slate-500 text-sm">
+              Fetching latest stock prices
+            </p>
+          </div>
         </div>
       </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+    );
+  }
+
+  return (
+    <main className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6 sm:p-10">
+      {/* Header */}
+      <div className="max-w-7xl mx-auto mb-8">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3 mb-2">
+            <Activity className="w-8 h-8 text-emerald-400" />
+            <h1 className="text-4xl font-bold text-white">X-Stock</h1>
+          </div>
+          {/* Connection Status */}
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <div 
+                className={`w-2 h-2 rounded-full ${
+                  connected ? 'bg-emerald-400' : 'bg-yellow-400'
+                }`}
+              />
+              <span className="text-slate-400 text-sm">
+                {connected ? 'WebSocket Live' : 'Polling Mode'}
+              </span>
+            </div>
+            {lastUpdate && (
+              <div className="text-slate-500 text-xs">
+                Updated: {lastUpdate.toLocaleTimeString()}
+              </div>
+            )}
+          </div>
+        </div>
+        <p className="text-slate-400 text-sm">Real-time market tracking</p>
+      </div>
+
+      {/* Stock Grid */}
+      <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {Object.values(stocks).map((stock) => {
+          const changePercent = getChangePercent(stock.current, stock.previous_close);
+          const positive = isPositive(stock.current, stock.previous_close);
+
+          return (
+            <div
+              key={stock.symbol}
+              className="group relative bg-slate-800/50 backdrop-blur-sm border border-slate-700/50 rounded-2xl p-6 hover:bg-slate-800/70 transition-all duration-300 hover:scale-105 hover:shadow-2xl hover:shadow-emerald-500/10"
+            >
+              {/* Glow effect */}
+              <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-emerald-500/0 via-emerald-500/5 to-emerald-500/0 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+
+              {/* Content */}
+              <div className="relative">
+                {/* Header */}
+                <div className="flex items-start justify-between mb-4">
+                  <div>
+                    <h2 className="text-2xl font-bold text-white mb-1">
+                      {stock.symbol}
+                    </h2>
+                    <div className="flex items-center gap-2">
+                      {positive ? (
+                        <TrendingUp className="w-4 h-4 text-emerald-400" />
+                      ) : (
+                        <TrendingDown className="w-4 h-4 text-red-400" />
+                      )}
+                      <span
+                        className={`text-sm font-semibold ${
+                          positive ? "text-emerald-400" : "text-red-400"
+                        }`}
+                      >
+                        {positive ? "+" : ""}{changePercent}%
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Current Price */}
+                <div className="mb-6">
+                  <div className="text-4xl font-bold text-white mb-1">
+                    ${stock.current.toFixed(2)}
+                  </div>
+                  <div className="text-slate-400 text-xs">Current Price</div>
+                </div>
+
+                {/* Stats Grid */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700/30">
+                    <div className="text-slate-400 text-xs mb-1">High</div>
+                    <div className="text-white font-semibold">
+                      ${stock.high.toFixed(2)}
+                    </div>
+                  </div>
+                  <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700/30">
+                    <div className="text-slate-400 text-xs mb-1">Low</div>
+                    <div className="text-white font-semibold">
+                      ${stock.low.toFixed(2)}
+                    </div>
+                  </div>
+                  <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700/30">
+                    <div className="text-slate-400 text-xs mb-1">Open</div>
+                    <div className="text-white font-semibold">
+                      ${stock.open.toFixed(2)}
+                    </div>
+                  </div>
+                  <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700/30">
+                    <div className="text-slate-400 text-xs mb-1">Prev Close</div>
+                    <div className="text-white font-semibold">
+                      ${stock.previous_close.toFixed(2)}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Empty State */}
+      {Object.keys(stocks).length === 0 && !loading && (
+        <div className="max-w-7xl mx-auto">
+          <div className="bg-slate-800/30 backdrop-blur-sm border border-slate-700/50 rounded-2xl p-12 text-center">
+            <Activity className="w-16 h-16 text-slate-600 mx-auto mb-4" />
+            <h3 className="text-xl font-semibold text-slate-400 mb-2">
+              No market data available
+            </h3>
+            <p className="text-slate-500 text-sm">
+              Markets may be closed or there's a connection issue
+            </p>
+            <button 
+              onClick={fetchInitialData}
+              className="mt-4 px-6 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      )}
+    </main>
   );
 }
