@@ -82,7 +82,17 @@ export default function Home() {
   // Setup WebSocket connection
   const setupWebSocket = useCallback(() => {
     try {
-      const ws = new WebSocket("ws://127.0.0.1:8000/ws/stocks");
+      // Use NEXT_PUBLIC_ prefix for client-side env vars, with fallback
+      const wsUrl = process.env.NEXT_PUBLIC_API_DOMAIN;
+      console.log("🔗 Connecting to WebSocket:", wsUrl);
+
+      if (!wsUrl) {
+        console.error("❌ WebSocket URL is undefined. Cannot connect.");
+        startPolling(); // Use polling if WebSocket URL is missing
+        return;
+      }
+
+      const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.onopen = () => {
