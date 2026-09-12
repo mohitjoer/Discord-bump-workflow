@@ -28,9 +28,9 @@ jobs:
       - name: Install Dependencies
         run: npm ci || npm install
 
-      - name: Install Playwright & Google Chrome
+      - name: Install Browsers & Google Chrome
         run: |
-          npx playwright install --with-deps chromium
+          npx rebrowser-playwright install --with-deps chromium
           wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /etc/apt/keyrings/google-chrome.gpg
           echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
           sudo apt-get update -y

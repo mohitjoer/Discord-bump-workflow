@@ -1,4 +1,4 @@
-import type { Page } from 'playwright';
+import type { Page } from 'rebrowser-playwright';
 import { createBrowserSession, saveScreenshot, type BrowserSession } from './browser.js';
 import { config } from './config.js';
 import { sendNotification } from './notifier.js';

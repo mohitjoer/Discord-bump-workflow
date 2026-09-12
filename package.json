@@ -22,9 +22,7 @@
   "license": "MIT",
   "dependencies": {
     "dotenv": "^16.4.7",
-    "playwright": "^1.50.1",
-    "playwright-extra": "^4.3.6",
-    "puppeteer-extra-plugin-stealth": "^2.11.2"
+    "rebrowser-playwright": "^1.52.0"
   },
   "devDependencies": {
     "@types/node": "^22.13.9",
