@@ -1,8 +1,18 @@
+# Agent memory & rules
 agents/
+.agents/
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+
+# Dependencies & Build
 node_modules/
 dist/
+
+# Session & Credentials
 user-data/
 storage-state.json
 .env
-screenshots/
 
+# Run outputs
+screenshots/
