@@ -1,0 +1,8 @@
+agents/
+node_modules/
+dist/
+user-data/
+storage-state.json
+.env
+screenshots/
+

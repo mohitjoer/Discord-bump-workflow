@@ -1,0 +1,65 @@
+name: Disboard Bumper (Every 4h 10m)
+
+on:
+  schedule:
+    # Runs at minute 10 past every 4th hour (00:10, 04:10, 08:10, 12:10, 16:10, 20:10 UTC)
+    - cron: '10 */4 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: disboard-bump
+  cancel-in-progress: false
+
+jobs:
+  bump-disboard:
+    name: Bump Disboard Server
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci || npm install
+
+      - name: Install Playwright & Google Chrome
+        run: |
+          npx playwright install --with-deps chromium
+          wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /etc/apt/keyrings/google-chrome.gpg
+          echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+          sudo apt-get update -y
+          sudo apt-get install -y google-chrome-stable xvfb
+
+      - name: Restore Storage State from Secret
+        if: env.STORAGE_STATE_JSON != ''
+        run: |
+          echo "$STORAGE_STATE_JSON" > storage-state.json
+        env:
+          STORAGE_STATE_JSON: ${{ secrets.STORAGE_STATE_JSON }}
+
+      - name: Run Disboard Bump
+        env:
+          HEADLESS: 'false'
+          STORAGE_STATE_JSON: ${{ secrets.STORAGE_STATE_JSON }}
+          DISBOARD_DASHBOARD_URL: ${{ secrets.DISBOARD_DASHBOARD_URL || 'https://disboard.org/dashboard/servers' }}
+          DISBOARD_SERVER_ID: ${{ secrets.DISBOARD_SERVER_ID || vars.DISBOARD_SERVER_ID }}
+          DISBOARD_BUMP_INTERVAL_MINUTES: '250'
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          xvfb-run --auto-servernum npm run bump:disboard
+
+      - name: Upload Run Screenshots (Debug only)
+        if: env.ENABLE_SCREENSHOT_ARTIFACTS == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: disboard-screenshots-${{ github.run_number }}
+          path: screenshots/
+          retention-days: 1
+        env:
+          ENABLE_SCREENSHOT_ARTIFACTS: ${{ vars.ENABLE_SCREENSHOT_ARTIFACTS }}
