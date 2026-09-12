@@ -11,6 +11,65 @@ export interface DisboardBumpResult {
   nextAvailableMinutes?: number;
 }
 
+async function handleCloudflareChallenge(page: Page): Promise<void> {
+  for (let attempt = 1; attempt <= 6; attempt++) {
+    const title = await page.title().catch(() => '');
+    const body = await page.innerText('body').catch(() => '');
+
+    const isChallenge =
+      title.includes('Just a moment') ||
+      title.includes('Security Verification') ||
+      title.includes('Cloudflare') ||
+      body.includes('Performing security verification') ||
+      body.includes('Verify you are human');
+
+    if (!isChallenge) {
+      return;
+    }
+
+    console.log(`[Disboard] Cloudflare Turnstile detected (attempt ${attempt}/6). Attempting to auto-solve...`);
+
+    try {
+      // 1. Check for Turnstile iframe and click checkbox position
+      const cfIframe = await page.$('iframe[src*="cloudflare"], iframe[src*="turnstile"], iframe[title*="Cloudflare"]');
+      if (cfIframe) {
+        const box = await cfIframe.boundingBox();
+        if (box) {
+          console.log(`[Disboard] Clicking Cloudflare Turnstile box at (${box.x + 28}, ${box.y + box.height / 2})...`);
+          await page.mouse.click(box.x + 28, box.y + box.height / 2);
+          await page.waitForTimeout(4000);
+          continue;
+        }
+      }
+
+      // 2. Check inside frames
+      const frames = page.frames();
+      for (const frame of frames) {
+        if (frame.url().includes('cloudflare') || frame.url().includes('turnstile')) {
+          const checkbox = await frame.$('input[type="checkbox"], span.mark, .ctp-checkbox-label, #challenge-stage');
+          if (checkbox && (await checkbox.isVisible())) {
+            console.log('[Disboard] Found checkbox inside iframe. Clicking...');
+            await checkbox.click({ delay: 150 });
+            await page.waitForTimeout(4000);
+            break;
+          }
+        }
+      }
+
+      // 3. Fallback: page-level checkbox
+      const pageCheckbox = await page.$('input[type="checkbox"], #challenge-stage, .cf-turnstile');
+      if (pageCheckbox && (await pageCheckbox.isVisible())) {
+        await pageCheckbox.click({ delay: 150 }).catch(() => null);
+        await page.waitForTimeout(4000);
+      }
+    } catch (e) {
+      console.warn('[Disboard] Error attempting Turnstile click:', e);
+    }
+
+    await page.waitForTimeout(3000);
+  }
+}
+
 export async function bumpDisboard(existingPage?: Page): Promise<DisboardBumpResult> {
   let session: BrowserSession | null = null;
   const page = existingPage || (session = await createBrowserSession()).page;
@@ -32,12 +91,8 @@ export async function bumpDisboard(existingPage?: Page): Promise<DisboardBumpRes
       return { success: false, bumpedCount: 0, cooldownCount: 0, message: msg };
     }
 
-    // Check Cloudflare or Turnstile challenge
-    const pageTitle = await page.title();
-    if (pageTitle.includes('Just a moment') || pageTitle.includes('Cloudflare')) {
-      console.log('[Disboard] Cloudflare challenge detected, waiting for resolution...');
-      await page.waitForTimeout(7000);
-    }
+    // Handle Cloudflare Turnstile challenge if present
+    await handleCloudflareChallenge(page);
 
     // Identify server cards on the dashboard
     // Disboard markup typically uses .server-card, .column, or server containers
