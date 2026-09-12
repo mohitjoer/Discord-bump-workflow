@@ -32,9 +32,14 @@ export async function createBrowserSession(headlessOverride?: boolean): Promise<
     );
   }
 
-  // Detect installed Google Chrome for best Cloudflare Turnstile bypass
+  // Detect installed Google Chrome for best Cloudflare bypass
   const hasChrome = fs.existsSync('/usr/bin/google-chrome') || fs.existsSync('/usr/bin/google-chrome-stable');
   const channel = hasChrome ? 'chrome' : undefined;
+
+  // Ensure persistent user data directory exists (helps with Cloudflare fingerprinting)
+  if (!fs.existsSync(config.userDataDir)) {
+    fs.mkdirSync(config.userDataDir, { recursive: true });
+  }
 
   const browser = await chromium.launch({
     headless,
@@ -45,21 +50,52 @@ export async function createBrowserSession(headlessOverride?: boolean): Promise<
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-infobars',
+      '--window-size=1366,768',
+      '--start-maximized',
+      '--lang=en-US',
     ],
     ignoreDefaultArgs: ['--enable-automation'],
   });
 
   const storageState = fs.existsSync(config.storageStatePath) ? config.storageStatePath : undefined;
 
+  // Realistic browser context mimicking a real desktop Chrome session
   const context = await browser.newContext({
     storageState,
     viewport: { width: 1366, height: 768 },
+    screen: { width: 1920, height: 1080 },
+    userAgent:
+      'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36',
+    locale: 'en-US',
+    timezoneId: 'America/New_York',
+    colorScheme: 'light',
+    reducedMotion: 'no-preference',
+    javaScriptEnabled: true,
+    bypassCSP: false,
+    hasTouch: false,
+    isMobile: false,
+    deviceScaleFactor: 1,
+  });
+
+  // Mask webdriver property inside every new page
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, 'webdriver', { get: () => false });
+    // Pretend we have standard plugin count
+    Object.defineProperty(navigator, 'plugins', {
+      get: () => [1, 2, 3, 4, 5],
+    });
+    // Pretend languages
+    Object.defineProperty(navigator, 'languages', {
+      get: () => ['en-US', 'en'],
+    });
+    // Chrome runtime mock
+    (window as any).chrome = { runtime: {} };
   });
 
   const page = await context.newPage();
 
-  page.setDefaultTimeout(45000);
-  page.setDefaultNavigationTimeout(45000);
+  page.setDefaultTimeout(60000);
+  page.setDefaultNavigationTimeout(60000);
 
   const close = async () => {
     try {

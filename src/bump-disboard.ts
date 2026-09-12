@@ -11,95 +11,153 @@ export interface DisboardBumpResult {
   nextAvailableMinutes?: number;
 }
 
-async function handleCloudflareChallenge(page: Page): Promise<boolean> {
-  for (let attempt = 1; attempt <= 10; attempt++) {
+/**
+ * Detect whether the current page is a Cloudflare challenge.
+ */
+function isCloudflareChallenge(title: string, bodyText: string): boolean {
+  return (
+    title.includes('Just a moment') ||
+    title.includes('Security Verification') ||
+    title.includes('Cloudflare') ||
+    bodyText.includes('Verify you are human') ||
+    bodyText.includes('Performing security verification') ||
+    bodyText.includes('Checking your browser') ||
+    bodyText.includes('Enable JavaScript and cookies')
+  );
+}
+
+/**
+ * Wait for Cloudflare's JS challenge to auto-resolve, with interactive fallback.
+ * Returns true if the challenge resolved, false if it timed out.
+ */
+async function waitForCloudflareResolution(page: Page, maxWaitSeconds: number = 45): Promise<boolean> {
+  const startTime = Date.now();
+  const maxWaitMs = maxWaitSeconds * 1000;
+  let attempt = 0;
+
+  while (Date.now() - startTime < maxWaitMs) {
+    attempt++;
+    const elapsed = Math.round((Date.now() - startTime) / 1000);
     const title = await page.title().catch(() => '');
-    const body = await page.innerText('body').catch(() => '');
+    const bodySnippet = (await page.innerText('body').catch(() => '')).slice(0, 300);
 
-    const isChallenge =
-      title.includes('Just a moment') ||
-      title.includes('Security Verification') ||
-      title.includes('Cloudflare') ||
-      body.includes('Performing security verification') ||
-      body.includes('Verify you are human') ||
-      body.includes('Cloudflare Turnstile');
-
-    if (!isChallenge) {
-      if (attempt > 1) {
-        console.log('[Disboard] Cloudflare challenge passed!');
-      }
+    if (!isCloudflareChallenge(title, bodySnippet)) {
+      console.log(`[Disboard] ✓ Cloudflare challenge resolved after ${elapsed}s (attempt ${attempt}).`);
       return true;
     }
 
-    console.log(`[Disboard] Cloudflare Turnstile detected (attempt ${attempt}/10). Attempting to solve...`);
+    // Log diagnostics every few attempts
+    if (attempt % 3 === 1) {
+      const url = page.url();
+      const frameCount = page.frames().length;
 
-    try {
-      // 1. Try finding Turnstile iframe using Playwright locator (pierces host shadow roots)
-      const iframeSelector =
-        'iframe[src*="challenges.cloudflare.com"], iframe[src*="cloudflare.com"], iframe[src*="turnstile"], iframe[title*="Cloudflare"], iframe[title*="Turnstile"], iframe[title*="security challenge"]';
+      // Check for Turnstile iframes
+      const turnstileIframeSelector =
+        'iframe[src*="challenges.cloudflare.com"], iframe[src*="turnstile"]';
+      const iframeCount = await page.locator(turnstileIframeSelector).count();
 
-      const iframeLocator = page.locator(iframeSelector);
-      const count = await iframeLocator.count();
+      console.log(
+        `[Disboard] Cloudflare challenge still active (${elapsed}s elapsed, attempt ${attempt}). ` +
+          `URL: ${url}, Title: "${title}", Frames: ${frameCount}, Turnstile iframes: ${iframeCount}`
+      );
 
-      if (count > 0) {
-        const frameEl = iframeLocator.first();
-        const box = await frameEl.boundingBox();
+      // If there's an interactive Turnstile iframe, try clicking it
+      if (iframeCount > 0) {
+        try {
+          const frameEl = page.locator(turnstileIframeSelector).first();
+          const box = await frameEl.boundingBox();
+          if (box && box.width > 0 && box.height > 0) {
+            const targetX = box.x + Math.min(30, box.width / 4);
+            const targetY = box.y + box.height / 2;
 
-        if (box && box.width > 0 && box.height > 0) {
-          const targetX = box.x + Math.min(30, box.width / 4);
-          const targetY = box.y + box.height / 2;
-
-          console.log(`[Disboard] Simulating human mouse movement to Turnstile box at (${Math.round(targetX)}, ${Math.round(targetY)})...`);
-          await page.mouse.move(targetX - 50, targetY - 20, { steps: 5 });
-          await page.waitForTimeout(200);
-          await page.mouse.move(targetX, targetY, { steps: 8 });
-          await page.waitForTimeout(300);
-          await page.mouse.click(targetX, targetY);
-          console.log('[Disboard] Clicked Turnstile checkbox area.');
-          await page.waitForTimeout(4000);
-        }
-      }
-
-      // 2. Try piercing into frame with frameLocator
-      const turnstileFrame = page.frameLocator(iframeSelector).first();
-      const checkbox = turnstileFrame.locator('input[type="checkbox"], .ctp-checkbox-label, span.mark, #challenge-stage, .cb-lb');
-      if (await checkbox.count() > 0) {
-        const cb = checkbox.first();
-        if (await cb.isVisible().catch(() => false)) {
-          console.log('[Disboard] Found checkbox via frameLocator. Clicking...');
-          await cb.click({ delay: 150 }).catch(() => null);
-          await page.waitForTimeout(4000);
-        }
-      }
-
-      // 3. Check inside attached frames
-      for (const frame of page.frames()) {
-        const fUrl = frame.url();
-        if (fUrl.includes('cloudflare') || fUrl.includes('turnstile') || fUrl.includes('challenge')) {
-          const frameCheckbox = frame.locator('input[type="checkbox"], .ctp-checkbox-label, span.mark, #challenge-stage, .cb-lb');
-          if (await frameCheckbox.count() > 0) {
-            console.log('[Disboard] Found checkbox in subframe. Clicking...');
-            await frameCheckbox.first().click({ delay: 150 }).catch(() => null);
-            await page.waitForTimeout(4000);
-            break;
+            // Simulate human-like cursor approach
+            await page.mouse.move(
+              targetX - 80 - Math.random() * 40,
+              targetY - 30 - Math.random() * 20,
+              { steps: 6 }
+            );
+            await page.waitForTimeout(150 + Math.random() * 200);
+            await page.mouse.move(targetX, targetY, { steps: 10 });
+            await page.waitForTimeout(100 + Math.random() * 200);
+            await page.mouse.click(targetX, targetY);
+            console.log(`[Disboard] Clicked Turnstile iframe at (${Math.round(targetX)}, ${Math.round(targetY)}).`);
           }
+        } catch (e) {
+          console.warn('[Disboard] Error clicking Turnstile iframe:', (e as Error).message);
         }
       }
-    } catch (e) {
-      console.warn('[Disboard] Error during Turnstile attempt:', e);
+
+      // Take a diagnostic screenshot periodically
+      if (attempt === 1 || attempt === 7) {
+        await saveScreenshot(page, `disboard-cf-challenge-${elapsed}s`);
+      }
     }
 
-    await page.waitForTimeout(3000);
+    // Wait 2 seconds between checks — Cloudflare JS evaluation can take 5-15s
+    await page.waitForTimeout(2000);
   }
 
   const finalTitle = await page.title().catch(() => '');
-  const finalBody = await page.innerText('body').catch(() => '');
-  return !(
-    finalTitle.includes('Just a moment') ||
-    finalTitle.includes('Security Verification') ||
-    finalBody.includes('Performing security verification') ||
-    finalBody.includes('Verify you are human')
-  );
+  const finalBody = (await page.innerText('body').catch(() => '')).slice(0, 300);
+  console.log(`[Disboard] ✗ Cloudflare challenge timed out after ${maxWaitSeconds}s.`);
+  console.log(`[Disboard]   Final title: "${finalTitle}"`);
+  console.log(`[Disboard]   Final body snippet: "${finalBody}"`);
+  return false;
+}
+
+/**
+ * Navigate to a URL and handle Cloudflare challenges.
+ * First warms up on the homepage if dashboard navigation gets blocked.
+ */
+async function navigateWithCloudflareBypass(page: Page, targetUrl: string): Promise<boolean> {
+  // Strategy 1: Navigate directly to the target
+  console.log(`[Disboard] Navigating to: ${targetUrl}`);
+  await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForTimeout(2000);
+
+  const title1 = await page.title().catch(() => '');
+  const body1 = (await page.innerText('body').catch(() => '')).slice(0, 300);
+
+  if (!isCloudflareChallenge(title1, body1)) {
+    console.log('[Disboard] Direct navigation succeeded — no Cloudflare challenge.');
+    return true;
+  }
+
+  console.log('[Disboard] Cloudflare challenge on direct navigation. Waiting for auto-resolution...');
+
+  // Give the JS challenge up to 30 seconds to auto-resolve
+  if (await waitForCloudflareResolution(page, 30)) {
+    return true;
+  }
+
+  // Strategy 2: Warm up on the homepage to earn cf_clearance
+  console.log('[Disboard] Direct approach failed. Trying homepage warm-up strategy...');
+  await page.goto('https://disboard.org/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForTimeout(2000);
+
+  if (await waitForCloudflareResolution(page, 30)) {
+    console.log('[Disboard] Homepage passed Cloudflare. Now navigating to dashboard...');
+    await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.waitForTimeout(3000);
+
+    const titleAfter = await page.title().catch(() => '');
+    const bodyAfter = (await page.innerText('body').catch(() => '')).slice(0, 300);
+    if (!isCloudflareChallenge(titleAfter, bodyAfter)) {
+      return true;
+    }
+
+    // One more chance for the dashboard challenge to resolve
+    return await waitForCloudflareResolution(page, 20);
+  }
+
+  // Strategy 3: Try a page reload (sometimes helps with stale JS challenge state)
+  console.log('[Disboard] Homepage warm-up failed. Trying reload on target...');
+  await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForTimeout(5000);
+  await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForTimeout(3000);
+
+  return await waitForCloudflareResolution(page, 20);
 }
 
 export async function bumpDisboard(existingPage?: Page): Promise<DisboardBumpResult> {
@@ -107,24 +165,17 @@ export async function bumpDisboard(existingPage?: Page): Promise<DisboardBumpRes
   const page = existingPage || (session = await createBrowserSession()).page;
 
   try {
-    console.log('\n[Disboard] Navigating to dashboard: ' + config.disboard.dashboardUrl);
-    await page.goto(config.disboard.dashboardUrl, {
-      waitUntil: 'domcontentloaded',
-      timeout: 45000,
-    });
+    // Navigate with multi-strategy Cloudflare bypass
+    const cfPassed = await navigateWithCloudflareBypass(page, config.disboard.dashboardUrl);
 
-    // Wait a brief moment for dynamic elements/hydration
-    await page.waitForTimeout(3000);
-
-    // Handle Cloudflare Turnstile challenge if present
-    const challengeCleared = await handleCloudflareChallenge(page);
-    if (!challengeCleared) {
-      const msg = 'Cloudflare challenge blocked access to Disboard. Check the run screenshot artifact for details.';
+    if (!cfPassed) {
+      const msg = 'Cloudflare challenge blocked access to Disboard after all bypass strategies. Check screenshot artifacts.';
       await saveScreenshot(page, 'disboard-cf-blocked');
       await sendNotification('Disboard Bump', msg, false);
       return { success: false, bumpedCount: 0, cooldownCount: 0, message: msg };
     }
 
+    // Check if we were redirected to login
     const currentUrl = page.url();
     if (currentUrl.includes('/login') || currentUrl.includes('discord.com/oauth2') || currentUrl.includes('/site/login')) {
       const msg = 'Session expired or not logged in. Please run `npm run login` to authenticate and update STORAGE_STATE_JSON secret.';
@@ -133,34 +184,25 @@ export async function bumpDisboard(existingPage?: Page): Promise<DisboardBumpRes
       return { success: false, bumpedCount: 0, cooldownCount: 0, message: msg };
     }
 
-    // Identify server cards on the dashboard
-    // Disboard markup typically uses .server-card, .column, or server containers
-    const serverSelectors = [
-      '.server-card',
-      '.server',
-      '.dashboard-server',
-      '.column.is-half',
-      '.column.is-one-third',
-      '.box',
-    ];
+    console.log(`[Disboard] Dashboard loaded. URL: ${currentUrl}`);
+    await saveScreenshot(page, 'disboard-dashboard');
 
-    let serverContainers = await page.$$(
-      serverSelectors.map((s) => `${s}:has(a[href*="/server/bump/"], button, .button)`).join(', ')
-    );
+    // Wait for dashboard content to fully hydrate
+    await page.waitForTimeout(2000);
 
-    // If generic card selectors don't match, find bump buttons directly
+    // Find bump buttons
     const bumpButtons = await page.$$(
       'a[href*="/server/bump/"], a.button.is-info:has-text("Bump"), button:has-text("Bump"), .btn-bump'
     );
 
-    console.log(`[Disboard] Found ${bumpButtons.length} active bump button(s).`);
+    console.log(`[Disboard] Found ${bumpButtons.length} bump button(s).`);
 
     let bumpedCount = 0;
     let cooldownCount = 0;
     let minCooldownMinutes = config.disboard.bumpIntervalMinutes;
 
     if (bumpButtons.length === 0) {
-      // Check if cooldown timer is present on the page (e.g. "01:37:18" or "bump in 1 hour")
+      // Check if cooldown timer is present on the page
       const pageText = await page.innerText('body').catch(() => '');
       const timerMatch = pageText.match(/(\d{1,2}):(\d{2}):(\d{2})/);
       const textCooldownMatches = pageText.match(/bump (?:in|again in) (\d+)\s*(?:hours?|h)?\s*(\d+)?\s*(?:minutes?|m)?/i);
@@ -201,7 +243,7 @@ export async function bumpDisboard(existingPage?: Page): Promise<DisboardBumpRes
       return { success: false, bumpedCount: 0, cooldownCount: 0, message: msg };
     }
 
-    // If specific server ID specified, filter for it, otherwise bump all available
+    // Process each bump button
     for (const button of bumpButtons) {
       try {
         const isVisible = await button.isVisible();
@@ -211,11 +253,11 @@ export async function bumpDisboard(existingPage?: Page): Promise<DisboardBumpRes
         const buttonText = ((await button.textContent()) || '').trim();
 
         if (config.disboard.serverId && !href.includes(config.disboard.serverId)) {
-          console.log(`[Disboard] Skipping server (${href}) - does not match target server ID: ${config.disboard.serverId}`);
+          console.log(`[Disboard] Skipping server (${href}) — does not match target: ${config.disboard.serverId}`);
           continue;
         }
 
-        // Check if this specific button shows a cooldown timer (e.g., "01:06:19")
+        // Check if this button shows a cooldown timer (e.g. "01:06:19")
         const timerMatch = buttonText.match(/(\d{1,2}):(\d{2}):(\d{2})/);
         if (timerMatch) {
           const hours = parseInt(timerMatch[1], 10);
@@ -232,7 +274,7 @@ export async function bumpDisboard(existingPage?: Page): Promise<DisboardBumpRes
           await page.waitForTimeout(500);
           await button.click();
 
-          // Wait for network response / update
+          // Wait for network response / page update
           await page.waitForTimeout(4000);
           bumpedCount++;
         }
