@@ -37,11 +37,10 @@ jobs:
           sudo apt-get install -y google-chrome-stable xvfb
 
       - name: Restore Storage State from Secret
-        if: env.STORAGE_STATE_JSON != ''
-        run: |
-          echo "$STORAGE_STATE_JSON" > storage-state.json
         env:
-          STORAGE_STATE_JSON: ${{ secrets.STORAGE_STATE_JSON }}
+          SECRET_JSON: ${{ secrets.STORAGE_STATE_JSON }}
+        run: |
+          node -e "if (process.env.SECRET_JSON) { try { const state = JSON.parse(process.env.SECRET_JSON); const fs = require('fs'); fs.writeFileSync('storage-state.json', JSON.stringify(state, null, 2), 'utf-8'); console.log('Successfully restored storage-state.json: ' + (state.cookies?.length || 0) + ' cookies, ' + (state.origins?.length || 0) + ' origins.'); } catch (e) { console.error('Failed to parse STORAGE_STATE_JSON as JSON:', e.message); process.exit(1); } } else { console.warn('Warning: STORAGE_STATE_JSON secret is empty'); }"
 
       - name: Run Disboard Bump
         env:
